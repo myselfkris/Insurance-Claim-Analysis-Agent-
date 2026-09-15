@@ -1,0 +1,23 @@
+# ---- Core ----
+langgraph>=0.2.0
+langchain-core>=0.3.0
+langchain-openai>=0.2.0
+pydantic>=2.7.0
+python-dotenv>=1.0.0
+pdfplumber>=0.11.0
+pandas>=2.0.0
+rank-bm25>=0.2.2
+streamlit>=1.35.0
+pytest>=8.0.0
+
+# ---- Optional LLM providers (imported lazily; install only what you use) ----
+langchain-anthropic>=0.2.0
+langchain-google-genai>=2.0.0
+langchain-ollama>=0.2.0
+
+# ---- Hybrid retrieval embeddings (local, offline; pulls torch so it is heavy).
+#      The retriever degrades gracefully to BM25-only if this is absent. ----
+sentence-transformers>=3.0.0
+
+# ---- Sample PDF generation for bundled demo scenarios ----
+reportlab>=4.0.0

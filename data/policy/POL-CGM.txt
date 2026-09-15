@@ -1,0 +1,8 @@
+POL-CGM: Continuous Glucose Monitor (CPT 95250)
+
+Criteria for coverage:
+1. The patient has type 1 diabetes.
+2. The patient uses intensive insulin therapy, such as an insulin pump or multiple daily injections.
+3. The patient tests blood glucose four or more times per day.
+
+A continuous glucose monitor is covered when the patient has type 1 diabetes and uses intensive insulin therapy.

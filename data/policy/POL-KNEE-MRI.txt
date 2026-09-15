@@ -1,0 +1,8 @@
+POL-KNEE-MRI: Knee MRI (CPT 73721)
+
+Criteria for coverage:
+1. The patient has knee pain that limits daily activities.
+2. The patient tried at least six weeks of conservative care such as physical therapy or anti-inflammatory medicine.
+3. An X-ray was done and shows a possible meniscal tear or joint space narrowing.
+
+Knee MRI is covered when all three criteria are met.

@@ -1,0 +1,4 @@
+DENIAL-KNEE-001: Denial of coverage
+
+Service: MRI of the right knee (CPT 73721).
+Reason: Not medically necessary — documentation does not show failure of conservative treatment.

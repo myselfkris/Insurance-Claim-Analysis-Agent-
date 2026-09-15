@@ -1,0 +1,8 @@
+POL-PT: Physical Therapy (CPT 97110)
+
+Criteria for coverage:
+1. The patient has a loss of function after surgery or injury.
+2. A doctor prescribed physical therapy.
+3. The treatment has clear and measurable goals.
+
+Physical therapy is covered when a doctor prescribes it and there are measurable goals.

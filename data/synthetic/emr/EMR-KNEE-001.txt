@@ -1,0 +1,6 @@
+EMR-KNEE-001: Clinical note — right knee pain
+
+History: 54-year-old patient with right knee pain for 3 months, worse with stairs and walking.
+Treatment tried: 8 weeks of physical therapy and ibuprofen with no improvement.
+Imaging: X-ray shows medial joint space narrowing and a possible meniscal tear.
+Diagnosis: medial meniscal tear (ICD-10 M23.31).
