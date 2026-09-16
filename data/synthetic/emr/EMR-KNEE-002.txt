@@ -1,0 +1,6 @@
+EMR-KNEE-002: Clinical note — right knee pain
+
+History: 54-year-old with right knee pain for 3 months.
+Treatment: Physical therapy was offered but the patient declined.
+Imaging: X-ray shows medial joint space narrowing.
+Diagnosis: knee pain.

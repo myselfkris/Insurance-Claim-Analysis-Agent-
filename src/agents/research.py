@@ -1,61 +1,69 @@
-"""Research agent: plan the appeal, retrieve evidence, check sufficiency, re-query."""
+"""Research: retrieve facts NEUTRALLY and extract coverage criteria.
+
+Neutral means we gather the facts (both directions), NOT "find evidence to help
+the patient". That neutrality is what lets the evaluator honestly reach NOT MET.
+"""
 from __future__ import annotations
 
 from ..audit import entry
-from ..config import settings
 from ..llm import invoke_structured
-from ..state import DenialPlan, GraphState, SufficiencyCheck
+from ..state import CriteriaSpec, GraphState
 
-MOCK_PLAN = {
+MOCK_CRITERIA = {
     "denial_type": "medical necessity",
-    "reasoning": (
-        "The denial says the knee MRI is not medically necessary, but the record "
-        "shows eight weeks of conservative care and an abnormal X-ray."
-    ),
-    "criteria_needed": [
-        "knee pain limiting daily activities",
-        "at least six weeks of conservative care",
-        "X-ray showing meniscal tear or joint space narrowing",
+    "criteria": [
+        {"id": "A", "description": "knee pain that limits daily activities"},
+        {"id": "B", "description": "at least six weeks of conservative care (physical therapy or anti-inflammatory medicine)"},
+        {"id": "C", "description": "X-ray showing meniscal tear or joint space narrowing"},
     ],
-    "initial_queries": [
-        "knee MRI coverage criteria",
-        "conservative care six weeks physical therapy anti-inflammatory medicine",
-    ],
+    "expression": "A AND B AND C",
+    "policy_citations": ["POL-KNEE-MRI-1"],
 }
 
-MOCK_SUFFICIENCY = {"sufficient": True, "missing": [], "reformulated_queries": []}
+# Neutral, generic section queries — not "help the patient" queries.
+NEUTRAL_QUERIES = ["symptoms", "treatment history", "imaging", "medications", "diagnosis"]
 
 
 def make_research_node(retriever):
     def node(state: GraphState) -> dict:
         denial = state.get("denial_text", "")
         case = state.get("case_text", "")
-        prompt = f"Denial:\n{denial}\n\nCase note:\n{case}\n\nReturn a plan."
-        plan = invoke_structured("research", DenialPlan, prompt, mock=MOCK_PLAN)
 
-        queries = list(plan.initial_queries)
-        evidence: list[dict] = []
+        # 1. Find the relevant policy (source of the coverage criteria).
+        policy_hits = retriever.search(denial, k=6, source_type="policy")
+
+        # 2. Retrieve the patient's facts neutrally, across all record sections.
+        emr_hits: list[dict] = []
         seen: set[str] = set()
-        for _ in range(settings.max_research_rounds):
-            for q in queries:
-                for hit in retriever.search(q, k=4):
-                    if hit["citation_key"] not in seen:
-                        seen.add(hit["citation_key"])
-                        evidence.append(hit)
-            check_prompt = (
-                f"Criteria needed:\n{plan.criteria_needed}\n\nEvidence found:\n"
-                + "\n".join(f"[{e['citation_key']}] {e['text'][:120]}" for e in evidence)
-            )
-            check = invoke_structured("research", SufficiencyCheck, check_prompt, mock=MOCK_SUFFICIENCY)
-            if check.sufficient:
-                break
-            queries = check.reformulated_queries or [f"{plan.denial_type} criteria"]
+        for q in NEUTRAL_QUERIES:
+            for hit in retriever.search(q, k=4, source_type="emr"):
+                if hit["citation_key"] not in seen:
+                    seen.add(hit["citation_key"])
+                    emr_hits.append(hit)
+
+        evidence = policy_hits + emr_hits
+
+        # 3. Extract criteria + boolean expression from the policy.
+        policy_block = "\n\n".join(f"[{h['citation_key']}] {h['text']}" for h in policy_hits)
+        prompt = (
+            f"Denial:\n{denial}\n\n"
+            f"Policy (source of truth for the criteria):\n{policy_block}\n\n"
+            "Extract the coverage criteria. Give each criterion a short id (A, B, C, ...) "
+            "and write the boolean expression using AND / OR / NOT / parentheses "
+            "(e.g. 'A AND B AND C' or '(A AND B) OR C')."
+        )
+        spec = invoke_structured("research", CriteriaSpec, prompt, mock=MOCK_CRITERIA)
 
         return {
-            "plan": plan.model_dump(),
+            "criteria_spec": spec.model_dump(),
             "retrieved_evidence": evidence,
-            "retrieval_queries": queries,
-            "audit_trail": [entry("research", "research", denial_type=plan.denial_type, n_evidence=len(evidence))],
+            "audit_trail": [entry(
+                "research", "research",
+                denial_type=spec.denial_type,
+                criteria=[c.id for c in spec.criteria],
+                expression=spec.expression,
+                n_evidence=len(evidence),
+            )],
         }
 
     return node

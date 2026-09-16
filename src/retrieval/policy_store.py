@@ -11,6 +11,9 @@ from pathlib import Path
 from ..config import PROJECT_ROOT
 from .bm25_index import BM25Index
 from .embedder import Embedder
+from .hybrid import cosine, rrf_fuse
+
+_POOL = 20  # candidate pool size for rank fusion (independent of requested k)
 
 
 @dataclass
@@ -56,7 +59,20 @@ class HybridRetriever:
         return self._vectors is not None
 
     def search(self, query: str, k: int = 5, source_type: str | None = None) -> list[dict]:
-        hits = self._bm25.search(query, k=k * 2 if source_type else k)
+        bm25_hits = self._bm25.search(query, k=_POOL)
+        if self._vectors is not None:
+            qvec = self._embedder.embed([query])
+            if qvec:
+                sims = sorted(
+                    ((cosine(qvec[0], v), i) for i, v in enumerate(self._vectors)),
+                    key=lambda x: -x[0],
+                )
+                emb_hits = [(i, s) for s, i in sims if s > 0.0][:_POOL]
+                hits = rrf_fuse([bm25_hits, emb_hits])
+            else:
+                hits = [(i, s) for i, s in bm25_hits]
+        else:
+            hits = [(i, s) for i, s in bm25_hits]
         out = []
         for idx, score in hits:
             c = self.chunks[idx]

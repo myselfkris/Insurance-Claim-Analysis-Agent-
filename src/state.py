@@ -12,40 +12,52 @@ from typing import Annotated, Literal, TypedDict
 from pydantic import BaseModel, Field
 
 
-# --------------------------------------------------------------------------- #
-# Structured-output schemas (used with .with_structured_output)
-# --------------------------------------------------------------------------- #
 class Evidence(BaseModel):
-    citation_key: str = Field(..., description="Stable key, e.g. POL-001 or EMR-002")
+    citation_key: str
     source_id: str
     source_type: Literal["policy", "emr"]
     text: str
     score: float = 0.0
 
 
-class DenialPlan(BaseModel):
+class Criterion(BaseModel):
+    id: str
+    description: str
+
+
+class CriteriaSpec(BaseModel):
     denial_type: str
+    criteria: list[Criterion]
+    expression: str
+    policy_citations: list[str] = Field(default_factory=list)
+
+
+class CriterionVerdict(BaseModel):
+    criterion_id: str
+    status: Literal["met", "not_met", "unverified"]
     reasoning: str
-    criteria_needed: list[str]
-    initial_queries: list[str]
+    citations: list[str] = Field(default_factory=list)
 
 
-class SufficiencyCheck(BaseModel):
-    sufficient: bool
-    missing: list[str] = Field(default_factory=list)
-    reformulated_queries: list[str] = Field(default_factory=list)
+class Evaluation(BaseModel):
+    criteria: list[CriterionVerdict]
 
 
-class CodeMapping(BaseModel):
-    icd10: list[str] = Field(default_factory=list)
-    cpt: list[str] = Field(default_factory=list)
-    notes: str = ""
-
-
-class LetterDraft(BaseModel):
+class AppealLetter(BaseModel):
     letter: str
-    citations: list[str] = Field(default_factory=list, description="citation keys used in the letter")
-    codes: CodeMapping
+    citations: list[str] = Field(default_factory=list)
+
+
+class UpholdExplanation(BaseModel):
+    explanation: str
+    unmet_criteria: list[str] = Field(default_factory=list)
+    citations: list[str] = Field(default_factory=list)
+
+
+class DocumentRequest(BaseModel):
+    request: str
+    missing_criteria: list[str] = Field(default_factory=list)
+    citations: list[str] = Field(default_factory=list)
 
 
 class CitationCheck(BaseModel):
@@ -54,25 +66,35 @@ class CitationCheck(BaseModel):
     reason: str
 
 
+class JudgeRecheck(BaseModel):
+    criterion_id: str
+    original_status: str
+    correct: bool
+    corrected_status: Literal["met", "not_met", "unverified"] | None = None
+    reasoning: str
+
+
+class Rechecks(BaseModel):
+    checks: list[JudgeRecheck] = Field(default_factory=list)
+
+
 class Verdict(BaseModel):
     verdict: Literal["pass", "fail"]
     confidence: float = Field(..., ge=0.0, le=1.0)
     feedback: str
-    reason: Literal["ready", "evidence_insufficient", "writing_citation"]
+    reason: Literal["ready", "judge_error", "grounding_error"]
     citation_checks: list[CitationCheck] = Field(default_factory=list)
+    judge_rechecks: list[JudgeRecheck] = Field(default_factory=list)
 
 
-# --------------------------------------------------------------------------- #
-# Graph state
-# --------------------------------------------------------------------------- #
 class GraphState(TypedDict, total=False):
     denial_text: str
     case_text: str
-    plan: dict | None
+    criteria_spec: dict | None
     retrieved_evidence: Annotated[list[dict], operator.add]
-    retrieval_queries: Annotated[list[str], operator.add]
-    codes: dict | None
-    letter_draft: dict | None
+    evaluation: dict | None
+    decision: str
+    output: dict | None
     verdict: dict | None
     confidence_score: float
     cycle_count: int

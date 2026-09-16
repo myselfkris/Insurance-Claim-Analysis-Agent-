@@ -13,6 +13,11 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
+# Redirect the HuggingFace model cache into the workspace (the sandbox cannot
+# write to ~/.cache). Must be set before any sentence_transformers import.
+os.environ.setdefault("HF_HOME", str(PROJECT_ROOT / ".hf_cache"))
+os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", str(PROJECT_ROOT / ".hf_cache"))
+
 _DEFAULT_MODELS = {
     "research": "gpt-4o-mini",
     "draft": "gpt-4o",

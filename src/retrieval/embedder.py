@@ -1,8 +1,9 @@
-"""Embedding wrapper with graceful degradation.
+"""Embedding wrapper using sentence-transformers (semantic), with graceful fallback.
 
-Default mode is `local` (sentence-transformers). If that package is missing,
-or mode is `off`, the embedder reports `available == False` and the retriever
-falls back to BM25-only. Real embeddings are an upgrade, not a requirement.
+Modes:
+  local  = sentence-transformers (semantic; downloads a model on first use)
+  openai = OpenAI embeddings (needs an API key)
+  off    = no embeddings (BM25 + synonyms only)
 """
 from __future__ import annotations
 

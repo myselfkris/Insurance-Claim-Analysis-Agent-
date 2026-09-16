@@ -9,6 +9,10 @@ env/
 # Secrets — never commit
 .env
 
+# Downloaded ML models — never commit
+.hf_cache/
+models/
+
 # Local data / databases
 data/cases.db
 *.db

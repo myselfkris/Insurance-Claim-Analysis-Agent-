@@ -1,0 +1,4 @@
+DENIAL-KNEE-003: Denial of coverage
+
+Service: MRI of the right knee (CPT 73721).
+Reason: Documentation insufficient — no record of conservative treatment.

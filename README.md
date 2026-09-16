@@ -21,23 +21,24 @@ This project fixes both: it is **honest** (it can say "the denial is correct") a
 
 ---
 
-## Architecture (target design)
+## Architecture
 
 ```mermaid
 flowchart TD
     A[Rejected Claim<br/>+ Patient Records<br/>+ Policy] --> B[RESEARCH<br/>neutral facts retrieval]
     B --> C[CRITERION EVALUATOR<br/>LLM judges each criterion]
-    C --> D{DECISION GATE}
-    D -->|any NOT MET| E[UPHOLD<br/>write denial explanation]
-    D -->|any UNVERIFIED| F[MORE INFO<br/>request missing document]
-    D -->|all MET| G[APPEAL<br/>draft appeal letter]
-    E --> H[VERIFY<br/>generalized grounding check]
+    C --> D{DECISION GATE<br/>AND / OR logic}
+    D -->|NOT MET| E[UPHOLD<br/>denial explanation]
+    D -->|UNVERIFIED| F[MORE INFO<br/>request document]
+    D -->|all MET| G[APPEAL<br/>draft letter]
+    E --> H[VERIFY]
     F --> H
     G --> H
+    H -.->|caught a judge error| C
     F -.->|human uploads the doc| B
     H --> I[(DATABASE<br/>SQLite)]
     I --> J[HUMAN REVIEW<br/>edit / approve / reject]
-    J --> K[Final hospital action]
+    J --> K[Final action]
 ```
 
 ### The honest triage — three states, not two
@@ -52,17 +53,28 @@ flowchart TD
 > UNVERIFIED usually maps to a *"documentation insufficient"* denial, which is
 > often **winnable** by supplying the missing note.
 
-### Decision gate (deterministic priority)
+### Decision gate — AND / OR logic (three-valued)
+
+Criteria are extracted as a boolean expression (e.g. `A AND B AND C` or
+`(A AND B) OR C`) and evaluated with **three-valued logic**:
 
 ```
-any criterion ❌ NOT MET     → UPHOLD
-else any ⚠️ UNVERIFIED       → REQUEST DOCUMENT
-else (all ✅ MET)            → APPEAL
+expression → True   → APPEAL
+expression → False  → UPHOLD
+expression → Unknown→ MORE INFO
 ```
 
-> Future refinement: criteria can be `AND`/`OR` (e.g. `(A AND B) OR C`), so the
-> gate should eventually understand mandatory vs. optional vs. alternative criteria
-> instead of a universal "any NOT MET".
+This naturally handles alternative criteria. Example: if the policy is
+`(A AND B) OR C`, then failing A but meeting C still routes to **APPEAL** —
+a naive "any NOT MET → uphold" rule would wrongly give up.
+
+### Two safety mechanisms
+
+1. **Anti-hallucination guard (code):** every citation in the output must exist
+   in the retrieved evidence — otherwise the output is forced to FAIL.
+2. **Double-check the judge (LLM):** VERIFY re-reads each criterion and confirms
+   (or corrects) the evaluator's MET / NOT MET / UNVERIFIED call. A caught judge
+   error loops back to the evaluator once.
 
 ---
 
@@ -78,7 +90,7 @@ rejected claim + records + policy
   EVALUATOR        LLM reads facts → each criterion = MET / NOT MET / UNVERIFIED
         │
         ▼
-  DECISION GATE    route by priority
+  DECISION GATE    three-valued AND/OR expression
         │
    ┌────┼────────┐
    ▼    ▼        ▼
@@ -88,7 +100,7 @@ rejected claim + records + policy
    │    │        │
    └────┼────────┘
         ▼
-  VERIFY          ground every output against real evidence (anti-hallucination)
+  VERIFY          ground output + double-check the judge
         │
         ▼
   DATABASE        save as "pending approval"
@@ -105,9 +117,10 @@ rejected claim + records + policy
 |---|---|---|
 | 1 | **Criterion Evaluator is an LLM** | distinguishing ❌ *"declined"* from ⚠️ *"not mentioned"* needs reading, not keyword match |
 | 2 | **Research retrieves neutrally** | if it only searches "for the patient", the ❌ NOT MET path is unreachable → the system can never be honest |
-| 3 | **Deterministic priority gate** | `NOT MET > UNVERIFIED > MET` |
-| 4 | **VERIFY is generalized** | it checks *whatever* the path produced (letter / explanation / document request), not just the letter |
-| 5 | **Re-upload loop** | UNVERIFIED → request doc → human uploads → re-run, with a cycle limit to prevent infinite loops |
+| 3 | **AND / OR boolean gate** | policies use `(A AND B) OR C`; a flat "any NOT MET" rule would give wrong answers |
+| 4 | **VERIFY is generalized** | it checks *whatever* the path produced (letter / explanation / request) |
+| 5 | **Double-check the judge** | the most important decision (MET/NOT MET/UNVERIFIED) is re-validated, not trusted blindly |
+| 6 | **Re-upload loop** | UNVERIFIED → request doc → human uploads → re-run |
 
 ---
 
@@ -117,9 +130,9 @@ rejected claim + records + policy
 |---|---|
 | Language | Python 3.10+ |
 | Agent orchestration | LangGraph |
-| LLM | DeepSeek via **our own urllib client** (no heavy SDK); also supports OpenAI/Anthropic/Google/Ollama/mock |
-| Retrieval | BM25 + stopwords + synonyms (pure Python, no install) |
-| Embeddings | optional (`sentence-transformers`), graceful fallback to BM25 |
+| LLM | DeepSeek via **our own urllib client** (no heavy SDK); also OpenAI/Anthropic/Google/Ollama/mock |
+| Retrieval | **Hybrid: BM25 + semantic embeddings**, fused by reciprocal rank fusion (RRF) |
+| Embeddings | `sentence-transformers` (`all-MiniLM-L6-v2`) — real semantic, downloads once |
 | UI | Streamlit |
 | Persistence | SQLite (stdlib) |
 | Validation | Pydantic (structured outputs) |
@@ -130,30 +143,37 @@ rejected claim + records + policy
 
 ```
 priorauth-crusher/
-├── app.py                    # Streamlit UI (Run + Admin)
+├── app.py                    # Streamlit UI (Analyze + Admin)
 ├── requirements.txt
 ├── .env.example              # copy to .env and add your key
 ├── src/
-│   ├── config.py             # provider, models, caps, db path
+│   ├── config.py             # provider, models, caps, db path, HF cache
 │   ├── llm.py                # provider factory + DeepSeek urllib client
 │   ├── state.py              # GraphState + pydantic schemas
-│   ├── graph.py              # LangGraph wiring
+│   ├── graph.py              # LangGraph wiring (gate + loop)
+│   ├── logic.py              # three-valued AND/OR evaluator
 │   ├── store.py              # SQLite (save / list / approve / reject)
 │   ├── audit.py              # audit-trail recorder
 │   ├── agents/
-│   │   ├── research.py       # plan + retrieve (+ sufficiency re-query)
-│   │   ├── draft.py          # write appeal letter
-│   │   └── verify.py         # grade + anti-hallucination guard
+│   │   ├── research.py       # neutral facts + criteria extraction
+│   │   ├── evaluator.py      # LLM judge: MET / NOT MET / UNVERIFIED
+│   │   ├── draft.py          # APPEAL path (letter)
+│   │   ├── uphold.py         # UPHOLD path (denial explanation)
+│   │   ├── request.py        # MORE INFO path (document request)
+│   │   └── verify.py         # grounding + double-check the judge
 │   ├── retrieval/
 │   │   ├── bm25_index.py     # BM25 + stopwords + synonyms
-│   │   ├── policy_store.py   # load/chunk docs + hybrid retriever
-│   │   └── embedder.py       # optional embeddings (graceful fallback)
+│   │   ├── embedder.py       # sentence-transformers (semantic)
+│   │   ├── hybrid.py         # cosine + reciprocal rank fusion
+│   │   └── policy_store.py   # hybrid retriever
 │   └── tools/search_tools.py
 ├── data/
 │   ├── policy/               # coverage rule documents
-│   └── synthetic/            # sample denials + patient records
+│   └── synthetic/            # sample denials + patient records (appeal/uphold/more_info)
 └── scripts/
-    ├── run_pipeline.py       # CLI runner
+    ├── run_pipeline.py       # CLI runner (appeal | uphold | more_info)
+    ├── download_model.py     # download the semantic model + sanity check
+    ├── test_hybrid.py        # 5-level retrieval test
     ├── test_providers.py     # provider routing checks
     └── retrieval_*.py        # Phase-1 de-risking tests
 ```
@@ -162,17 +182,27 @@ priorauth-crusher/
 
 ## Run it
 
-### 1. Mock mode (no API key — fastest)
+### 0. One-time: download the semantic model
 
 ```bash
-cp .env.example .env          # then set LLM_PROVIDER=mock in .env
+python scripts/download_model.py
+```
+
+(The first `Analyze` run also downloads it automatically.)
+
+### 1. Mock mode (no API key)
+
+```bash
+cp .env.example .env          # set LLM_PROVIDER=mock
 streamlit run app.py
 ```
 
-Or CLI:
+Or CLI — run all three triage paths:
 
 ```bash
-LLM_PROVIDER=mock python scripts/run_pipeline.py
+LLM_PROVIDER=mock python scripts/run_pipeline.py appeal
+LLM_PROVIDER=mock python scripts/run_pipeline.py uphold
+LLM_PROVIDER=mock python scripts/run_pipeline.py more_info
 ```
 
 ### 2. Real DeepSeek
@@ -190,32 +220,38 @@ Then `streamlit run app.py`.
 ## Current status
 
 **Implemented (working, verified):**
-- ✅ Retrieval with BM25 + stopwords + synonyms — **11/11** on the 5-level test
-- ✅ 3-agent pipeline (research → draft → verify) with re-query loop
-- ✅ Anti-hallucination guard (letter can't cite evidence it never found)
+- ✅ Honest triage — three states + three paths (appeal / uphold / more info)
+- ✅ AND / OR boolean gate (three-valued logic)
+- ✅ Double-check the judge + anti-hallucination guard
+- ✅ **Hybrid search** — BM25 + real semantic embeddings (RRF fusion)
 - ✅ DeepSeek client via `urllib` (no `langchain-openai` needed)
-- ✅ Async approval workflow (AI saves → human approves; no `interrupt()`)
-- ✅ Streamlit UI (Run + Admin)
-- ✅ Provider architecture checks (mock / deepseek / openai)
+- ✅ Async approval workflow (AI saves → human approves)
+- ✅ Streamlit UI (Analyze + Admin)
+- ✅ Mock mode + provider routing checks
 
-**Next (the target architecture above):**
-- ⏳ Neutral `RESEARCH` + `CRITERION EVALUATOR` (LLM) node
-- ⏳ `UPHOLD` path (denial explanation) and `MORE INFO` path (document request)
-- ⏳ Generalized `VERIFY` (checks all three outputs)
-- ⏳ Re-upload loop with cycle limit
+**Remaining (nice-to-haves):**
+- ⏳ Run with a real DeepSeek key
+- ⏳ Formal pytest eval suite (faithfulness / grounding / precision)
+- ⏳ Re-upload cycle limit tracking (round counter in DB)
+- ⏳ OCR for scanned/image PDFs
 
 ---
 
-## Retrieval de-risking (why BM25 + synonyms, not just BM25)
+## Retrieval — why hybrid, not just BM25
 
-A 5-level difficulty test showed raw BM25 **fails on paraphrase** (different words,
-same meaning). Adding stopword removal + a small synonym map lifted it to **11/11**.
+Raw BM25 (exact words) **fails on paraphrase** — it matched words, not meaning.
+The hybrid (BM25 + semantic embeddings) fixes this.
 
 | Mode | Level 1–4 (top-1 correct) |
 |---|---|
 | raw BM25 | 9/11 |
-| + stopwords | 9/11 |
-| + stopwords + synonyms | **11/11** |
+| BM25 + synonyms | 11/11 |
+| **Hybrid (BM25 + embeddings)** | **10/11** (with true semantic matching; the one "miss" is a query phrased as a patient description, which correctly matches a patient record — in the real pipeline policies and records are searched separately) |
 
-True embeddings are an optional upgrade for unseen wording; they are **not**
-required to validate the idea.
+Semantic proof — meaning, not characters:
+
+| Pair | Similarity |
+|---|---|
+| "knee pain" vs "chronic ache in the joint below the thigh" | 0.619 |
+| "knee pain" vs "continuous glucose monitor" | -0.058 |
+| "sugar monitoring device" vs "continuous glucose monitor" | **0.689** |
